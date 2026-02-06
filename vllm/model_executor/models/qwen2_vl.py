@@ -33,6 +33,7 @@ from typing import Annotated, Any, Literal, TypeAlias
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from einops import rearrange
 from transformers import BatchFeature
 from transformers.models.qwen2_vl import Qwen2VLImageProcessor, Qwen2VLProcessor
@@ -458,7 +459,9 @@ class Qwen2VisionPatchEmbed(nn.Module):
         self.embed_dim = embed_dim
 
         kernel_size = (temporal_patch_size, patch_size, patch_size)
-        self.proj = Conv3dLayer(
+
+        # 保持 Conv3d 定义，确保加载 Checkpoint 时 key 匹配
+        self.proj = nn.Conv3d(
             in_channels,
             embed_dim,
             kernel_size=kernel_size,
@@ -466,11 +469,20 @@ class Qwen2VisionPatchEmbed(nn.Module):
             bias=False,
         )
 
+        # Conv 权重默认是连续的
+        self.flat_weight_shape = (embed_dim, -1)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        L, C = x.shape
-        x = x.view(L, -1, self.temporal_patch_size, self.patch_size, self.patch_size)
-        x = self.proj(x).view(L, self.embed_dim)
-        return x
+        # x shape: (L, Total_Input_Pixels), 例如: (56700, 3 * 2 * 14 * 14) = (56700, 1176)
+        # 确保输入内存连续
+        if not x.is_contiguous():
+            x = x.contiguous()
+        weight = self.proj.weight.view(self.flat_weight_shape)
+        # 偏差处理 (Bias Handling)
+        bias = self.proj.bias
+        # Conv3d (stride=k) 等同于将每个 Patch 拉平后与权重矩阵做点积。
+        out = F.linear(x, weight, bias)
+        return out
 
 
 class Qwen2VisionPatchMerger(nn.Module):

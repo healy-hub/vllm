@@ -59,7 +59,7 @@ void qr_all_reduce(quickreduce::fptr_t _fa, torch::Tensor& inp,
                    torch::Tensor& out, int64_t quant_level, bool cast_bf2half) {
   auto fa = reinterpret_cast<quickreduce::DeviceComms*>(_fa);
   const at::cuda::OptionalCUDAGuard device_guard(device_of(inp));
-  auto stream = at::cuda::getCurrentHIPStreamMasqueradingAsCUDA();
+  auto stream = at::cuda::getCurrentCUDAStream().stream();
 
   TORCH_CHECK_EQ(inp.scalar_type(), out.scalar_type());
   TORCH_CHECK_EQ(inp.numel(), out.numel());

@@ -8,6 +8,7 @@ from pydantic import Field, SkipValidation, field_validator, model_validator
 
 from vllm.config.utils import config
 from vllm.logger import init_logger
+from vllm.utils.torch_utils import is_quantized_kv_cache
 
 logger = init_logger(__name__)
 
@@ -38,6 +39,8 @@ class CacheConfig:
     Accepts None (meaning "use default"). After construction, always int."""
     user_specified_block_size: bool = field(default=False, init=False)
     """Whether block_size was explicitly provided. Derived automatically."""
+    user_specified_mamba_block_size: bool = field(default=False, init=False)
+    """Whether mamba_block_size was explicitly provided. Derived automatically."""
     gpu_memory_utilization: float = Field(default=0.9, gt=0, le=1)
     """The fraction of GPU memory to be used for the model executor, which can
     range from 0 to 1. For example, a value of 0.5 would imply 50% GPU memory
@@ -182,6 +185,7 @@ class CacheConfig:
             "cpu_kvcache_space_bytes",
             "mamba_page_size_padded",
             "user_specified_block_size",
+            "user_specified_mamba_block_size",
             "_block_size_resolved",
             # Post-init/derived counters
             "num_gpu_blocks",
@@ -214,6 +218,8 @@ class CacheConfig:
             object.__setattr__(self, "block_size", self.DEFAULT_BLOCK_SIZE)
         else:
             object.__setattr__(self, "user_specified_block_size", True)
+        if self.mamba_block_size is not None:
+            object.__setattr__(self, "user_specified_mamba_block_size", True)
         return self
 
     @field_validator("calculate_kv_scales", mode="after")
@@ -231,7 +237,7 @@ class CacheConfig:
     @field_validator("cache_dtype", mode="after")
     @classmethod
     def _validate_cache_dtype(cls, cache_dtype: CacheDType) -> CacheDType:
-        if cache_dtype.startswith("fp8"):
+        if is_quantized_kv_cache(cache_dtype):
             logger.info(
                 "Using fp8 data type to store kv cache. It reduces the GPU "
                 "memory footprint and boosts the performance. "
